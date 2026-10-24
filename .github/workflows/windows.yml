@@ -15,13 +15,13 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install Windows curses support
-        run: py -3 -m pip install -r requirements-windows.txt
+        run: python -m pip install -r requirements-windows.txt
       - name: Run non-Unix tests
         shell: pwsh
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
-          py -3 -m unittest test_focus test_history test_history_views test_home test_ui -v
+          python -m unittest test_focus test_history test_history_views test_home test_ui -v
       - name: Exercise the Windows console interface
         shell: pwsh
         env:
@@ -69,5 +69,5 @@ jobs:
               raise SystemExit("Windows probe changed stored history")
           print("WINDOWS_CURSES_PROBE=ok")
           '@
-          $probe | py -3 -
+          $probe | python -
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

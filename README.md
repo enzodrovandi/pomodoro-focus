@@ -25,7 +25,7 @@ Illustrative English preview (synthetic text, not a screenshot):
 
 ## Quick start
 
-Requires **native Linux or macOS**, **Python 3.10+ with standard-library `curses`**, and an interactive terminal. Use **80 columns × 24 rows or larger** for the full interface; smaller windows may truncate content. No package installation is needed when Python and curses are available.
+Requires **Linux, macOS, or Windows**, **Python 3.10+**, and an interactive terminal. Linux and macOS use standard-library `curses`. Windows first needs the optional dependency in `requirements-windows.txt`: Use **80 columns × 24 rows or larger** for the full interface; smaller windows may truncate content. No package installation is needed when Python and curses are available.
 
 ```sh
 git clone https://github.com/enzodrovandi/pomodoro-focus.git
@@ -33,7 +33,16 @@ cd pomodoro-focus
 ./pomofocus
 ```
 
-The launcher uses `python3` from your current `PATH`. You can also run `python3 focus.py` from the source directory.
+The Unix launcher uses `python3` from your current `PATH`. You can also run `python3 focus.py` from the source directory.
+
+On Windows, from the source directory:
+
+```bat
+py -3 -m pip install -r requirements-windows.txt
+pomofocus.cmd
+```
+
+Use Windows Terminal for arrow keys and color. `pomofocus.cmd` forwards arguments to `py -3 focus.py`; the Unix `pomofocus` launcher is not a native Windows command.
 
 ```sh
 ./pomofocus --lang en           # English for this run

@@ -45,7 +45,7 @@ SPANISH = {
     "Interactive focus sessions with goals, distractions and optional breaks.": "Sesiones de concentración con objetivos, distracciones y descansos opcionales.",
     "show this help message and exit": "Mostrá esta ayuda y salí.",
     "Interface language: es (Spanish, default) or en (English).": "Idioma de la interfaz: es (español, predeterminado) o en (inglés).",
-    "Pomodoro Focus needs an interactive terminal. Run: python3 focus.py": "Pomodoro Focus necesita una terminal interactiva. Ejecutá: python3 focus.py",
+    "Pomodoro Focus needs an interactive terminal. Run: {command}": "Pomodoro Focus necesita una terminal interactiva. Ejecutá: {command}",
     "Unable to initialize the terminal. Check TERM and terminal support.": "No se pudo iniciar la terminal. Revisá TERM y la compatibilidad de tu terminal.",
     "h: history": "h: historial",
     "n: new session | m: home | q: exit | j/k: scroll summary | h: history": "n: nueva sesión | m: inicio | q: salir | j/k: recorrer resumen | h: historial",

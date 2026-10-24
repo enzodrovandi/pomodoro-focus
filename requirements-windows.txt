@@ -1,0 +1,2 @@
+# Windows CPython does not ship the standard curses module.
+windows-curses==2.4.2

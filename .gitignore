@@ -1,6 +1,8 @@
 # Python bytecode, environments, and development caches
 __pycache__/
 *.py[cod]
+*.egg-info/
+.venv-windows/
 .venv/
 venv/
 env/

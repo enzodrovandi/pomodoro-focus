@@ -38,7 +38,7 @@ class TerminalTests(unittest.TestCase):
                                 text=True, capture_output=True)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr, "Pomodoro Focus needs an interactive terminal. Run: python3 focus.py\n")
+        self.assertEqual(result.stderr, "Pomodoro Focus needs an interactive terminal. Run: python3 focus.py\n" if sys.platform != "win32" else "Pomodoro Focus needs an interactive terminal. Run: py -3 focus.py\n")
 
     def test_english_help_accepts_either_argument_order_and_existing_abbreviation(self):
         for flags in (["--help", "--lang", "en"], ["--lang", "en", "--he"],
@@ -65,7 +65,7 @@ class TerminalTests(unittest.TestCase):
                                         cwd=ROOT, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(result.stdout, "")
-                self.assertEqual(result.stderr, "Pomodoro Focus necesita una terminal interactiva. Ejecutá: python3 focus.py\n")
+                self.assertEqual(result.stderr, "Pomodoro Focus necesita una terminal interactiva. Ejecutá: python3 focus.py\n" if sys.platform != "win32" else "Pomodoro Focus necesita una terminal interactiva. Ejecutá: py -3 focus.py\n")
 
     def test_language_validation(self):
         for flags, expected in [(["--lang", "fr"], "Idioma inválido: fr. Usá es o en."),

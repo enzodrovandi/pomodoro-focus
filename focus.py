@@ -328,7 +328,8 @@ def main():
     parser.add_argument("--history", action="store_true", help=tr("Open local history without starting a block."))
     args = parser.parse_args()
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        print(tr("Pomodoro Focus needs an interactive terminal. Run: python3 focus.py"), file=sys.stderr)
+        command = "py -3 focus.py" if sys.platform == "win32" else "python3 focus.py"
+        print(tr("Pomodoro Focus needs an interactive terminal. Run: {command}").format(command=command), file=sys.stderr)
         return 1
     try:
         curses.wrapper(app, tr, args.history)

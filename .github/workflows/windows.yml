@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: "3.13"
       - name: Install Windows curses support
         run: py -3 -m pip install -r requirements-windows.txt
       - name: Run non-Unix tests

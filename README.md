@@ -1,6 +1,6 @@
 # Pomodoro Focus
 
-A quiet terminal app for working on one concrete goal at a time. Choose a short focus block, park distractions, and leave yourself a next step. No accounts, cloud services, ratings, streaks, or external Python dependencies.
+A quiet terminal app for working on one concrete goal at a time. Choose a short focus block, park distractions, and leave yourself a next step. No accounts, cloud services, ratings, or streaks. Linux and macOS need no external Python dependencies; Windows needs `windows-curses`.
 
 - **Start small:** choose 5, 25, or 50 minutes, then take an optional 5-minute break.
 - **Stay in the terminal:** pause, record distractions, and finish early when needed.
@@ -25,7 +25,9 @@ Illustrative English preview (synthetic text, not a screenshot):
 
 ## Quick start
 
-Requires **Linux, macOS, or Windows**, **Python 3.10+**, and an interactive terminal. Linux and macOS use standard-library `curses`. Windows first needs the optional dependency in `requirements-windows.txt`: Use **80 columns × 24 rows or larger** for the full interface; smaller windows may truncate content. No package installation is needed when Python and curses are available.
+Requires **Python 3.10+** and an interactive terminal on Linux or macOS, with standard-library `curses` available. **Windows support is under validation**, not yet established by an end-to-end Windows run; it requires the dependency in `requirements-windows.txt`.
+
+Use **80 columns × 24 rows or larger** for the full interface; smaller windows may truncate content. No package installation is needed when Python and curses are available.
 
 ```sh
 git clone https://github.com/enzodrovandi/pomodoro-focus.git
@@ -42,7 +44,7 @@ py -3 -m pip install -r requirements-windows.txt
 pomofocus.cmd
 ```
 
-Use Windows Terminal for arrow keys and color. `pomofocus.cmd` forwards arguments to `py -3 focus.py`; the Unix `pomofocus` launcher is not a native Windows command.
+For manual Windows testing, use Windows Terminal; arrow-key behavior, color, and physical interactive usability still need validation. `pomofocus.cmd` forwards arguments to `py -3 focus.py`; the Unix `pomofocus` launcher is not a native Windows command.
 
 ```sh
 ./pomofocus --lang en           # English for this run
@@ -130,7 +132,11 @@ python3 -m unittest -v
 ./pomofocus --help
 ```
 
-Tests use isolated temporary state, never real user history. Interactive tests use Unix pseudo-terminals. The suite covers the launcher, bilingual CLI, session timing, navigation, local storage, calendar, and interruption behavior.
+Tests use isolated temporary state, never real user history. Interactive Linux tests use Unix pseudo-terminals. The suite covers the launcher, bilingual CLI, session timing, navigation, local storage, calendar, and interruption behavior.
+
+The Windows Actions job uses Python 3.13 and pinned `windows-curses`, runs the portable tests, then runs `python .github/scripts/windows_console_smoke.py`. Installation and logic tests alone do **not** prove console compatibility. The smoke creates a real Windows console child (Actions shell streams are redirected), renders through `curses.wrapper` and the actual app, injects bounded synthetic keys through curses, and checks observed bilingual home/history/calendar rendering, selected sessions/dates, cell glyphs, palette attributes or explicit monochrome capability, unchanged synthetic history, and clean exit. Exceptions, missing results, exhausted input, and a 20-second child timeout fail the job. The script reports unavailable with a failing exit code on Linux.
+
+This automated backend smoke is pending a successful Windows Actions run. Even a passing run does not prove physical arrow-key input or manual Windows Terminal usability: synthetic queued keys exercise backend decoding and routing, not physical keyboard events. Manual bilingual navigation, glyph legibility, colors, resize behavior, and terminal restoration remain separate interactive checks. The job uses only temporary synthetic data and publishes no history or screenshots.
 
 ## License
 

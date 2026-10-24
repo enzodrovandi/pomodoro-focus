@@ -1,4 +1,5 @@
 """Public local-store and automatic session persistence contracts."""
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 import tempfile
@@ -57,7 +58,7 @@ class HistoryTests(unittest.TestCase):
             self.assertEqual(self.path.read_bytes(), contents)
         import sqlite3
         other = Path(self.temp.name) / "other.sqlite3"
-        with sqlite3.connect(other) as connection:
+        with closing(sqlite3.connect(other)) as connection, connection:
             connection.execute("CREATE TABLE unrelated (value TEXT)")
         original = other.read_bytes()
         with self.assertRaises(HistoryError):
@@ -76,7 +77,7 @@ class HistoryTests(unittest.TestCase):
     def test_invalid_existing_rows_are_not_extended_or_rewritten(self):
         self.store.append(record())
         import sqlite3
-        with sqlite3.connect(self.path) as connection:
+        with closing(sqlite3.connect(self.path)) as connection, connection:
             connection.execute("UPDATE sessions SET focus_seconds=-1")
         original = self.path.read_bytes()
         with self.assertRaises(HistoryError):

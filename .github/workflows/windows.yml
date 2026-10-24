@@ -21,53 +21,11 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
-          python -m unittest test_focus test_history test_history_views test_home test_ui -v
+          python -m unittest test_focus test_history test_history_views test_home test_ui test_windows_console_smoke -v
       - name: Exercise the Windows console interface
         shell: pwsh
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-          TERM: xterm-256color
         run: |
-          $env:XDG_DATA_HOME = Join-Path $env:RUNNER_TEMP "pomodoro-data"
-          New-Item -ItemType Directory -Force $env:XDG_DATA_HOME | Out-Null
-          $probe = @'
-          import os, queue, threading, time
-          from datetime import datetime, timedelta
-          from pathlib import Path
-          os.environ.setdefault("TERM", "xterm-256color")
-          import curses
-          from history import HistoryStore, Record
-          from i18n import translator
-          from focus import app
-
-          data = Path(os.environ["XDG_DATA_HOME"]) / "pomodoro-focus" / "history.sqlite3"
-          store = HistoryStore(data)
-          now = datetime.now().astimezone().replace(microsecond=0)
-          for index, seconds in enumerate((90, 1500, 3000)):
-              started = now - timedelta(days=index)
-              store.append(Record(str(index), started.isoformat(), f"Goal {index}", f"Step {index}",
-                                  3000, seconds, "complete" if seconds == 3000 else "early"))
-          before = store.records()
-          keys = queue.Queue()
-          for key in ("2", curses.KEY_DOWN, "\n", "q", "c", curses.KEY_LEFT, curses.KEY_RIGHT, "q", "q"):
-              keys.put(key)
-
-          def screen_get_wch(screen):
-              deadline = time.monotonic() + 5
-              while keys.empty() and time.monotonic() < deadline:
-                  time.sleep(0.01)
-              return keys.get_nowait()
-
-          original = curses.window.get_wch
-          curses.window.get_wch = screen_get_wch
-          try:
-              curses.wrapper(app, translator("en"))
-          finally:
-              curses.window.get_wch = original
-          after = store.records()
-          if after != before:
-              raise SystemExit("Windows probe changed stored history")
-          print("WINDOWS_CURSES_PROBE=ok")
-          '@
-          $probe | python -
+          python .github/scripts/windows_console_smoke.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

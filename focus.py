@@ -29,6 +29,7 @@ class Session:
         self.paused = False
         self.paused_remaining = self.duration
         self.phase = "focus"
+        self.expired_phase = None
         self.distractions = []
         self.progress = ""
         self.next_step = ""
@@ -43,6 +44,7 @@ class Session:
             return 0
         value = self.paused_remaining if self.paused else max(0, self.deadline - self.clock())
         if value <= 0:
+            self.expired_phase = self.phase
             if self.phase == "focus":
                 self.focus_seconds = self.duration
                 self.phase = "reflection"
@@ -85,28 +87,39 @@ class Session:
 
 
 def prompt(screen, title, label, tr, required=False, session=None):
-    """Inline editor; countdown continues while a distraction is being written."""
+    """Inline editor; expiry returns the draft for parking before the alert."""
     value = ""
-    while True:
-        frame(screen, title)
-        put(screen, 5, label)
-        width = max(1, content_width(screen) - 3)
-        put(screen, 7, "> " + value[-width:] + "_", curses.A_BOLD)
-        footer(screen, tr("Enter: confirm | Esc: cancel | Backspace: erase"))
+    if session is not None:
+        screen.timeout(200)
+    try:
+        while True:
+            frame(screen, title)
+            put(screen, 5, label)
+            width = max(1, content_width(screen) - 3)
+            put(screen, 7, "> " + value[-width:] + "_", curses.A_BOLD)
+            footer(screen, tr("Enter: confirm | Esc: cancel | Backspace: erase"))
+            if session is not None:
+                left = session.remaining()
+                if session.phase != "focus":
+                    return value.strip()
+                put(screen, 12, tr("Time left: {minutes:02d}:{seconds:02d}").format(minutes=left // 60, seconds=left % 60))
+            screen.refresh()
+            try:
+                key = screen.get_wch()
+            except curses.error:
+                continue
+            if key in ("\n", "\r", curses.KEY_ENTER):
+                if value.strip() or not required:
+                    return value.strip()
+            elif key == "\x1b":
+                return None
+            elif key in (curses.KEY_BACKSPACE, "\x7f", "\b"):
+                value = value[:-1]
+            elif isinstance(key, str) and key.isprintable() and len(value) < 240:
+                value += key
+    finally:
         if session is not None:
-            left = session.remaining()
-            put(screen, 12, tr("Time left: {minutes:02d}:{seconds:02d}").format(minutes=left // 60, seconds=left % 60))
-        screen.refresh()
-        key = screen.get_wch()
-        if key in ("\n", "\r", curses.KEY_ENTER):
-            if value.strip() or not required:
-                return value.strip()
-        elif key == "\x1b":
-            return None
-        elif key in (curses.KEY_BACKSPACE, "\x7f", "\b"):
-            value = value[:-1]
-        elif isinstance(key, str) and key.isprintable() and len(value) < 240:
-            value += key
+            screen.timeout(-1)
 
 
 def choose(screen, title, lines, choices, hints=None):
@@ -129,7 +142,44 @@ def home(screen, tr):
                   "12q", hints=tr("q: exit"))
 
 
-def run_timer(screen, session, tr):
+def show_alert(screen, phase, tr, clock=time.monotonic, player=None):
+    """Consume one key or wait ten seconds, even when playback is unavailable."""
+    if player is None:
+        # Load audio only at expiry; help and ordinary navigation need no backend.
+        from alert import AlertPlayer
+        player = AlertPlayer()
+    deadline = clock() + 10
+    frame(screen, tr("FOCUS TIME IS UP") if phase == "focus" else tr("BREAK TIME IS UP"))
+    put(screen, 7, tr("Press any key to stop the alert."), curses.A_BOLD, align="center")
+    screen.refresh()
+    try:
+        try:
+            player.start(10)
+        except Exception:
+            pass
+        next_bell = clock()
+        while clock() < deadline:
+            if getattr(player, "needs_bell", False) and clock() >= next_bell:
+                try:
+                    curses.beep()
+                except curses.error:
+                    pass
+                next_bell = clock() + 0.3
+            screen.timeout(max(1, min(50, math.ceil((deadline - clock()) * 1000))))
+            try:
+                screen.get_wch()
+                break
+            except curses.error:
+                continue
+    finally:
+        try:
+            player.stop()
+        except Exception:
+            pass
+        screen.timeout(-1)
+
+
+def run_timer(screen, session, tr, player=None):
     screen.timeout(200)
     try:
         while session.phase in ("focus", "break"):
@@ -171,6 +221,10 @@ def run_timer(screen, session, tr):
                 elif not was_paused:
                     session.toggle_pause()
                 screen.timeout(200)
+        if session.expired_phase is not None:
+            phase = session.expired_phase
+            session.expired_phase = None
+            show_alert(screen, phase, tr, clock=session.clock, player=player)
     finally:
         screen.timeout(-1)
 

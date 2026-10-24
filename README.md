@@ -83,6 +83,10 @@ From home, press **`1` for New session** or **`2` for History and analysis**; `q
 
 Reflection fields are optional. Pauses, exit confirmation, reflection, and breaks do not count as effective focus time. The timer continues while you write a distraction. Distractions appear in the current summary only; they are not stored in history.
 
+A naturally finished focus block or break plays an alternating-tone alert for 10 seconds, or until **any key** stops it. Focus then goes to reflection; a break goes to the summary. Finishing early, confirming leave, and skipping a break do not play an alert. If time expires while writing a distraction, the current non-empty draft is parked and the alert replaces the editor.
+
+Sound uses Windows beeps, macOS `afplay`, or an available Linux player (`paplay`, `pw-play`, `aplay`), with a local PulseAudio-compatible socket as the Linux fallback. If playback fails, the app tries terminal beeps (which depend on terminal settings). The time's-up notice still stays visible until a key or the 10-second deadline even if no sound is available.
+
 ## Controls
 
 Shortcuts are the same in both languages, including `y` to confirm closing a block.
@@ -93,6 +97,7 @@ Shortcuts are the same in both languages, including `y` to confirm closing a blo
 | Text input | Enter: confirm; Backspace: erase; Esc: cancel (or skip a reflection field) |
 | Duration | `1`/`2`/`3`: 5/25/50 minutes; `h`: history, then return to preparation; Esc: home; `q`: exit |
 | Timer | Space: pause/resume; `d`: park a distraction during focus; `f`: finish early; `q`: ask before closing |
+| Time's-up alert | Any key: stop sound and continue |
 | Close confirmation | `y`: close and reflect; `n`: resume |
 | Break selection | `b`: take a break; `s`: skip |
 | Summary | `m`: home; `n`: new session; `h`: history; `j`/`k`: page notes; `q`: exit |
@@ -113,12 +118,12 @@ Weeks run **Monday–Sunday**. A block crossing midnight belongs entirely to its
 
 The calendar is a rolling **12-week view, not a month**: each **cell is a day**, each **column is a week**, and rows are weekdays. It ends on the selected week's Sunday and follows your selection across month and year boundaries. Brackets mark the selected day. Gray-to-green levels show no time, under 25 minutes, 25 to under 50 minutes, and 50 minutes or more; text symbols distinguish levels without color. Empty days remain selectable and carry no penalty.
 
-These are descriptive activity totals, **not a measure of concentration**. The app does not block other applications, play music, or claim that a particular block length improves focus.
+These are descriptive activity totals, **not a measure of concentration**. The app does not block other applications or play music. The only sound is the end-of-block alert above. It does not claim that a particular block length improves focus.
 
 ## Local storage and privacy
 
 - History lives at `$XDG_DATA_HOME/pomodoro-focus/history.sqlite3` when `XDG_DATA_HOME` is absolute; otherwise it uses `~/.local/share/pomodoro-focus/history.sqlite3`. Storage is independent of the source directory.
-- There is **no telemetry, network communication, cloud sync, or account system**.
+- There is **no telemetry, remote network communication, cloud sync, or account system**. Linux audio may use a local Unix socket to the sound server; only generated tones are sent, never goals or notes.
 - Data is **unencrypted**: anyone with access to your user files may read goals and reflections. New database files request owner-only permissions, subject to filesystem semantics.
 - Records are validated and appended transactionally, not edited or deleted. Existing corrupt, empty, or incompatible databases are not reset or automatically upgraded. Save/read errors are shown rather than silently discarding existing data; failed saves are not automatically retried.
 - Ordinary Ctrl+C attempts to save an active block and confirmed reflections. A failed interrupt-time save reports an error and exits with status 1. **Hard termination, power loss, or interruption during saving can lose an unsaved block.** There are no periodic checkpoints, backups, or recovery tools. Interrupted first-time initialization can leave an incompatible file that is not overwritten.

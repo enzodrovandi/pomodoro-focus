@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import test_history
 from test_ui import TerminalSurface
@@ -67,7 +67,8 @@ class WindowsProbeTests(unittest.TestCase):
                 patch.dict(os.environ, XDG_DATA_HOME=directory), \
                 patch.object(probe.curses, "has_colors", return_value=False), \
                 patch.object(probe.curses, "curs_set"), \
-                patch.object(probe.curses, "ungetch", side_effect=screen.ungetch), \
+                patch.object(probe, "inject_key", side_effect=lambda key: screen.ungetch(
+                    ord(key) if isinstance(key, str) else key)), \
                 patch.object(ui, "ACCENT", ui.ACCENT), \
                 patch.object(ui, "ACTIVITY_COLORS", ui.ACTIVITY_COLORS):
             checks = probe.exercise(screen)
@@ -178,9 +179,128 @@ Path(sys.argv[2]).write_text(json.dumps(checks), encoding="utf-8")
                 for connection in connections:
                     connection.close()
 
+    def test_transport_routes_windows_keys_and_preserves_posix_pushback(self):
+        probe = load_probe()
+        keys = ("2", "q", "c", "\n", probe.curses.KEY_DOWN, probe.curses.KEY_UP,
+                probe.curses.KEY_LEFT, probe.curses.KEY_RIGHT)
+        with patch.object(probe, "write_console_input") as native, \
+                patch.object(probe.curses, "ungetch") as push:
+            with patch.object(probe.sys, "platform", "win32"):
+                for key in keys:
+                    probe.inject_key(key)
+                self.assertEqual(native.call_count, len(keys))
+                push.assert_not_called()
+            native.reset_mock()
+            with patch.object(probe.sys, "platform", "linux"):
+                for key in keys:
+                    probe.inject_key(key)
+                    push.assert_called_with(ord(key) if isinstance(key, str) else key)
+                native.assert_not_called()
+
+    def test_native_records_have_windows_layout_and_exact_script_fields(self):
+        import ctypes
+        probe = load_probe()
+        self.assertEqual(ctypes.sizeof(probe.KeyEvent), 16)
+        self.assertEqual(ctypes.sizeof(probe.InputRecord), 20)
+        self.assertEqual(probe.InputRecord.Event.offset, 4)
+        self.assertEqual(probe.KeyEvent.UnicodeChar.offset, 10)
+        self.assertEqual(probe.KeyEvent.dwControlKeyState.offset, 12)
+        for key, vk, scan, char, controls in (
+                ("2", 0x32, 0x03, "2", 0), ("q", 0x51, 0x10, "q", 0),
+                ("c", 0x43, 0x2e, "c", 0), ("\n", 0x0d, 0x1c, "\r", 0),
+                (probe.curses.KEY_DOWN, 0x28, 0x50, "\0", 0x100),
+                (probe.curses.KEY_UP, 0x26, 0x48, "\0", 0x100),
+                (probe.curses.KEY_LEFT, 0x25, 0x4b, "\0", 0x100),
+                (probe.curses.KEY_RIGHT, 0x27, 0x4d, "\0", 0x100)):
+            with self.subTest(key=key):
+                events = probe.native_key_events(key)
+                self.assertEqual(len(events), 2)
+                for event, down in zip(events, (1, 0)):
+                    self.assertEqual(event.EventType, 1)
+                    record = event.Event.KeyEvent
+                    self.assertEqual((record.bKeyDown, record.wRepeatCount,
+                                      record.wVirtualKeyCode, record.wVirtualScanCode,
+                                      record.UnicodeChar, record.dwControlKeyState),
+                                     (down, 1, vk, scan, ord(char), controls))
+
+    def test_unsupported_native_keys_fail_before_writing(self):
+        probe = load_probe()
+        with patch.object(probe.sys, "platform", "win32"), \
+                patch.object(probe, "write_console_input") as write:
+            for key in ("x", "", "qq", 9999):
+                with self.subTest(key=key), self.assertRaisesRegex(ValueError, "unsupported"):
+                    probe.inject_key(key)
+            write.assert_not_called()
+
+    def test_native_writer_owns_writable_handle_and_rejects_errors_and_short_writes(self):
+        import ctypes
+        probe = load_probe()
+        for success, count in ((True, 2), (False, 0), (True, 1)):
+            with self.subTest(success=success, count=count):
+                kernel, console, runtime = Mock(), Mock(), Mock()
+                console.fileno.return_value = 42
+                opened = Mock(__enter__=Mock(return_value=console),
+                              __exit__=Mock(return_value=False))
+                runtime.get_osfhandle.return_value = 0x123456789
+
+                def write(handle, records, length, written):
+                    self.assertEqual(handle, 0x123456789)
+                    self.assertEqual(length, 2)
+                    self.assertEqual(records[0].Event.KeyEvent.bKeyDown, 1)
+                    ctypes.cast(written, ctypes.POINTER(ctypes.c_uint32))[0] = count
+                    return success
+
+                kernel.WriteConsoleInputW.side_effect = write
+                with patch("builtins.open", return_value=opened) as open_console, \
+                        patch.dict(sys.modules, msvcrt=runtime), \
+                        patch.object(ctypes, "WinDLL", return_value=kernel, create=True), \
+                        patch.object(ctypes, "get_last_error", return_value=5, create=True), \
+                        patch.object(ctypes, "WinError", side_effect=lambda code: OSError(code, "denied"),
+                                     create=True):
+                    if success and count == 2:
+                        probe.write_console_input(probe.native_key_events("q"))
+                    else:
+                        with self.assertRaises(OSError):
+                            probe.write_console_input(probe.native_key_events("q"))
+                open_console.assert_called_once_with("CONIN$", "r+b", buffering=0)
+                opened.__exit__.assert_called_once()
+                runtime.get_osfhandle.assert_called_once_with(42)
+                self.assertIs(kernel.WriteConsoleInputW.argtypes[0], ctypes.c_void_p)
+                self.assertIs(kernel.WriteConsoleInputW.restype, ctypes.c_int32)
+
+    def test_windows_injection_failure_preserves_failure_receipt(self):
+        probe = load_probe()
+        real = Mock()
+        with tempfile.TemporaryDirectory() as directory:
+            result = Path(directory) / "result.json"
+            def run_exercise(function):
+                return probe.ScriptedScreen(real, [("q", lambda window: None)]).get_wch()
+            with patch.object(probe, "bind_console"), \
+                    patch.object(probe.sys, "platform", "win32"), \
+                    patch.object(probe.curses, "wrapper", side_effect=run_exercise), \
+                    patch.object(probe, "write_console_input", side_effect=OSError("native write failed")):
+                with self.assertRaisesRegex(OSError, "native write failed"):
+                    probe.child_main(result)
+            receipt = json.loads(result.read_text(encoding="utf-8"))
+            self.assertIs(receipt["ok"], False)
+            self.assertIn("OSError: native write failed", receipt["traceback"])
+            real.get_wch.assert_not_called()
+
+    def test_observed_type_mismatch_is_not_coerced_or_consumed(self):
+        probe = load_probe()
+        real = Mock()
+        real.get_wch.return_value = ord("q")
+        screen = probe.ScriptedScreen(real, [("q", lambda window: None)])
+        with patch.object(probe, "inject_key") as inject:
+            with self.assertRaisesRegex(AssertionError, r"expected 'q' \(str\), observed 113 \(int\)"):
+                screen.get_wch()
+            inject.assert_called_once_with("q")
+        self.assertEqual(screen.consumed, 0)
+        real.get_wch.assert_called_once_with()
+
     def test_exhausted_script_fails_without_reading_or_injecting(self):
         probe = load_probe()
-        with patch.object(probe.curses, "ungetch") as inject:
+        with patch.object(probe, "inject_key") as inject:
             screen = probe.ScriptedScreen(object(), [])
             with self.assertRaisesRegex(AssertionError, "input script exhausted"):
                 screen.get_wch()
@@ -193,9 +313,9 @@ Path(sys.argv[2]).write_text(json.dumps(checks), encoding="utf-8")
         real.get_wch.return_value = "q"
         check = Mock()
         screen = probe.ScriptedScreen(real, [("q", check)])
-        with patch.object(probe.curses, "ungetch") as inject:
+        with patch.object(probe, "inject_key") as inject:
             self.assertEqual(screen.get_wch(), "q")
-            inject.assert_called_once_with(ord("q"))
+            inject.assert_called_once_with("q")
         check.assert_called_once_with(real)
         screen.refresh()
         real.refresh.assert_called_once_with()
@@ -208,14 +328,14 @@ Path(sys.argv[2]).write_text(json.dumps(checks), encoding="utf-8")
         real.get_wch.return_value = "x"
         check = Mock(side_effect=AssertionError("render failed"))
         screen = probe.ScriptedScreen(real, [("q", check)])
-        with patch.object(probe.curses, "ungetch") as inject:
+        with patch.object(probe, "inject_key") as inject:
             with self.assertRaisesRegex(AssertionError, "render failed"):
                 screen.get_wch()
             inject.assert_not_called()
         screen = probe.ScriptedScreen(real, [("q", lambda window: None)])
         with self.assertRaisesRegex(AssertionError, "before consuming"):
             screen.assert_finished(1)
-        with patch.object(probe.curses, "ungetch"):
+        with patch.object(probe, "inject_key"):
             with self.assertRaisesRegex(AssertionError, "decoding mismatch"):
                 screen.get_wch()
 

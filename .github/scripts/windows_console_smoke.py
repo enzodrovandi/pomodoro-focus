@@ -7,6 +7,7 @@ Failures preserve the child exception and traceback in that result, so redirecte
 console stderr cannot hide the diagnostic from the Actions log. No locals or
 environment values are captured.
 """
+import ctypes
 import curses
 import json
 import os
@@ -51,6 +52,68 @@ def supervise(command, result, **options):
     return receipt
 
 
+# Fixed Windows ABI widths also make record tests portable: host c_wchar and
+# c_ulong are not necessarily Windows WCHAR (16 bits) and DWORD (32 bits).
+class KeyEvent(ctypes.Structure):
+    _fields_ = [("bKeyDown", ctypes.c_int32), ("wRepeatCount", ctypes.c_uint16),
+                ("wVirtualKeyCode", ctypes.c_uint16), ("wVirtualScanCode", ctypes.c_uint16),
+                ("UnicodeChar", ctypes.c_uint16), ("dwControlKeyState", ctypes.c_uint32)]
+
+
+class ConsoleEvent(ctypes.Union):
+    _fields_ = [("KeyEvent", KeyEvent), ("storage", ctypes.c_byte * 16)]
+
+
+class InputRecord(ctypes.Structure):
+    _fields_ = [("EventType", ctypes.c_uint16), ("Event", ConsoleEvent)]
+
+
+def native_key_events(key):
+    """Only the smoke's keys: native key down/up, with CR for Windows Enter."""
+    keys = {
+        "2": (0x32, 0x03, "2", 0), "q": (0x51, 0x10, "q", 0),
+        "c": (0x43, 0x2e, "c", 0), "\n": (0x0d, 0x1c, "\r", 0),
+        curses.KEY_DOWN: (0x28, 0x50, "\0", 0x100),
+        curses.KEY_UP: (0x26, 0x48, "\0", 0x100),
+        curses.KEY_LEFT: (0x25, 0x4b, "\0", 0x100),
+        curses.KEY_RIGHT: (0x27, 0x4d, "\0", 0x100),
+    }
+    if key not in keys:
+        raise ValueError(f"unsupported scripted key: {key!r}")
+    vk, scan, char, controls = keys[key]
+    events = (InputRecord * 2)()
+    for event, down in zip(events, (1, 0)):
+        event.EventType = 1  # KEY_EVENT
+        event.Event.KeyEvent = KeyEvent(down, 1, vk, scan, ord(char), controls)
+    return events
+
+
+def write_console_input(events):
+    """Write to this child's attached console, never its read-only stdin handle."""
+    import msvcrt
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.WriteConsoleInputW.argtypes = [ctypes.c_void_p, ctypes.POINTER(InputRecord),
+                                         ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
+    kernel.WriteConsoleInputW.restype = ctypes.c_int32
+    # CONIN$ refers to our attached console even when Actions redirects stdio.
+    # This separate read/write descriptor owns the handle and closes on all paths.
+    with open("CONIN$", "r+b", buffering=0) as console:
+        handle = msvcrt.get_osfhandle(console.fileno())
+        written = ctypes.c_uint32()
+        if not kernel.WriteConsoleInputW(handle, events, len(events), ctypes.byref(written)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if written.value != len(events):
+            raise OSError(f"WriteConsoleInputW short write: {written.value}/{len(events)} events")
+
+
+def inject_key(key):
+    if sys.platform == "win32":
+        write_console_input(native_key_events(key))
+    else:
+        curses.ungetch(ord(key) if isinstance(key, str) else key)
+
+
 class ScriptedScreen:
     """Forward all rendering to the real window; inject one checked key at a time."""
 
@@ -68,9 +131,11 @@ class ScriptedScreen:
         except StopIteration as error:
             raise AssertionError("input script exhausted") from error
         check(self.screen)
-        curses.ungetch(ord(key) if isinstance(key, str) else key)
+        inject_key(key)
         observed = self.screen.get_wch()
-        assert observed == key, f"backend key decoding mismatch at step {self.consumed}"
+        assert observed == key, (f"backend key decoding mismatch at step {self.consumed}: "
+                                 f"expected {key!r} ({type(key).__name__}), "
+                                 f"observed {observed!r} ({type(observed).__name__})")
         self.consumed += 1
         return observed
 
@@ -114,7 +179,7 @@ def exercise(screen):
 
     assert screen.getmaxyx()[0] >= 24 and screen.getmaxyx()[1] >= 80, "console smaller than 80x24"
     screen.encoding = "utf-8"
-    # Blocking input is safe: exactly one key is pushed immediately before each read.
+    # One scripted key is queued before each read; the supervisor bounds the child.
     screen.timeout(-1)
     store = HistoryStore()
     now = datetime.now().astimezone().replace(microsecond=0)

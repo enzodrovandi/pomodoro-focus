@@ -3,6 +3,9 @@
 The Actions shell has redirected streams. A bounded child gets its own Windows
 console and explicitly binds the C/Python standard descriptors to that console.
 Only synthetic history and a small result JSON live in session temporary state.
+Failures preserve the child exception and traceback in that result, so redirected
+console stderr cannot hide the diagnostic from the Actions log. No locals or
+environment values are captured.
 """
 import curses
 import json
@@ -11,6 +14,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import traceback
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -25,7 +29,17 @@ def supervise(command, result, **options):
             child.wait()
             raise RuntimeError("Windows console child timed out") from error
     if code:
-        raise RuntimeError(f"Windows console child exit {code}")
+        diagnostic = ""
+        try:
+            failure = json.loads(result.read_text(encoding="utf-8"))
+            if isinstance(failure, dict):
+                detail = failure.get("traceback") or failure.get("error")
+                if isinstance(detail, str):
+                    # Keep Windows redirected stderr readable even for Unicode errors.
+                    diagnostic = "\n" + detail.encode("ascii", "backslashreplace").decode("ascii")
+        except (OSError, ValueError):
+            pass  # Missing/malformed diagnostics never override the nonzero exit.
+        raise RuntimeError(f"Windows console child exit {code}{diagnostic}")
     if not result.is_file():
         raise RuntimeError("Windows console child missing result")
     try:
@@ -196,6 +210,10 @@ def child_main(result):
         bind_console()
         sys.path.insert(0, str(ROOT))
         receipt = {"ok": True, "checks": curses.wrapper(exercise)}
+    except Exception as error:
+        receipt.update(error=f"{type(error).__name__}: {error}",
+                       traceback=traceback.format_exc())
+        raise
     finally:
         # Written even on an exception; nonzero exit remains authoritative.
         result.write_text(json.dumps(receipt), encoding="utf-8")

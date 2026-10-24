@@ -241,6 +241,53 @@ Path(sys.argv[2]).write_text(json.dumps(checks), encoding="utf-8")
                        f"from pathlib import Path; Path({str(result)!r}).write_text('{{\"ok\": true}}')"]
             self.assertEqual(probe.supervise(command, result), {"ok": True})
 
+    def test_child_preserves_exception_and_writes_failure_diagnostics(self):
+        probe = load_probe()
+        for stage in ("bind", "render"):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
+                result = Path(directory) / "result.json"
+                error = RuntimeError(f"synthetic {stage} failure")
+                with patch.object(probe, "bind_console", side_effect=error if stage == "bind" else None), \
+                        patch.object(probe.curses, "wrapper", side_effect=error):
+                    with self.assertRaises(RuntimeError) as caught:
+                        probe.child_main(result)
+                self.assertIs(caught.exception, error)
+                receipt = json.loads(result.read_text(encoding="utf-8"))
+                self.assertIs(receipt["ok"], False)
+                self.assertEqual(receipt["error"], f"RuntimeError: synthetic {stage} failure")
+                self.assertIn("Traceback (most recent call last):", receipt["traceback"])
+                self.assertIn(receipt["error"], receipt["traceback"])
+                self.assertNotIn("checks", receipt)
+
+    def test_parent_surfaces_child_exception_even_with_console_stderr_hidden(self):
+        probe = load_probe()
+        child_script = """
+import importlib.util
+from pathlib import Path
+import sys
+spec = importlib.util.spec_from_file_location("probe", sys.argv[1])
+probe = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(probe)
+def fail():
+    raise RuntimeError("synthetic hidden console failure: ■")
+probe.bind_console = fail
+probe.child_main(Path(sys.argv[2]))
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            result = Path(directory) / "result.json"
+            command = [sys.executable, "-c", child_script, str(SCRIPT.resolve()), str(result)]
+            with self.assertRaises(RuntimeError) as caught:
+                probe.supervise(command, result, stderr=subprocess.DEVNULL)
+            message = str(caught.exception)
+            self.assertIn("Windows console child exit 1", message)
+            self.assertIn("RuntimeError: synthetic hidden console failure", message)
+            self.assertIn("Traceback (most recent call last):", message)
+            self.assertIn("\\u25a0", message)
+            self.assertTrue(message.isascii())
+            receipt = json.loads(result.read_text(encoding="utf-8"))
+            self.assertIs(receipt["ok"], False)
+            self.assertIn("■", receipt["error"])
+
     def test_timeout_kills_and_reaps_child(self):
         probe = load_probe()
         with patch.object(probe.subprocess, "Popen") as popen:
